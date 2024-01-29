@@ -1,197 +1,68 @@
-// SPDX-License-Identifier: GPL-3.0
-pragma solidity >=0.8.2 <0.9.0;
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
 
-//Stores and manages data objects for other contracts. 
-contract DataObjectStore {
-    uint64 instanceId;
-    mapping(uint64 => mapping(string => address)) importReferences;
-    mapping(uint64 => mapping(string => uint64)) importInstanceIds;
-    mapping(string => address) dataObjects;
+contract LandToken {
 
-    constructor(Lands landsContract) {
-        dataObjects["Lands"] = address(landsContract);
-    }
-    
-    //Creates a new instance of a DataObjectStore.
-    function createInstance() public returns (uint64) {
-        return instanceId++;
-    }
-    //Returns the ID of the most recently created instance.
-    function getLatestInstanceId() public view returns (uint64) {
-        return instanceId;
-    }
-    // Retrieves an imported data object.
-    function getImportedDataObject(uint64 id, string memory identifier) public view returns (address) {
-        return importReferences[id][identifier];
-    }
-    //Retrieves an imported data object.
-    function getImportedDataObjectInstance(uint64 id, string memory identifier) public view returns (uint64) {
-        return importInstanceIds[id][identifier];
-    }
-    //Retrieves a data object by its identifier.
-    function getDataObject(string memory identifier) public view returns (address) {
-        return dataObjects[identifier];
-    }
-    //Imports a data object from another contract.
-    function importDataObject(uint64 id, string memory identifier, address dataObject, uint64 referenceId) public {
-        importReferences[id][identifier] = dataObject;
-        importInstanceIds[id][identifier] = referenceId;
-    }
-}
+// Struct containing basic information about the land
+  struct Land {
+    address institution;
+    string location;
+    uint256 area;
+    bool active;
+  }
 
+// Struct containing token information for the land
+  struct Token {
+    uint256 tokenId;
+    uint256 landId;
+    bool active;
+  }
 
+// Mapping to store lands and tokens
+  mapping(uint256 => Land) public lands;
+  mapping(uint256 => Token) public tokens;
 
-contract User {
-    struct UserInfo {
-        string name;
-        string surname;
-        uint64 userId;
-        uint64 age;
-        string email;
-        string addres;
-    }
+// Mapping to associate institutions with their corresponding landId values
+  mapping(address => uint256) public institutionLands;
 
-    mapping(address => UserInfo) public users;
+// Modifier to grant permission to add land
+  modifier onlyInstitution() {
+    require(msg.sender == lands[institutionLands[msg.sender]].institution, "You do not have permission for this operation.");
+    _;
+  }
 
-    DataObjectStore _store;
+// Function to add land
+  function addLand(uint256 _landId, string memory _location, uint256 _area) public onlyInstitution {
+    Land storage land = lands[_landId];
+    require(land.institution == address(0), "Land already added.");
+     
+    land.institution = msg.sender;
+    land.location = _location;
+    land.area = _area;
+    land.active = true;
 
-    constructor(DataObjectStore store) {
-        _store = store;
-    }
+// Store the institution's landId in the institutionLands mapping
+    institutionLands[msg.sender] = _landId;
 
-    function registerCustomer(string memory name, string memory surname, uint64 userId, uint64 age, string memory email, string memory addres) public {
-        users[msg.sender] = UserInfo({
-            name: name,
-            surname: surname,
-            userId: userId,
-            age: age,
-            email: email,
-            addres: addres
-        });
-    }
+// Create a token
+    Token storage token = tokens[_landId];
+    token.tokenId = _landId;
+    token.landId = _landId;
+    token.active = true;
+  }
 
-    function getCustomerInfo() public view returns (string memory, uint64, string memory) {
-        UserInfo storage info = users[msg.sender];
-        return (info.name, info.age, info.addres);
-    }
+// Function to update land information
+  function updateLand(uint256 _landId, string memory _location, uint256 _area) public onlyInstitution {
+    Land storage land = lands[_landId];
+    require(land.institution == msg.sender, "You do not have permission to update this land.");
 
-    function updateCustomerInfo(string memory newEmail, string memory newAddres) public {
-        UserInfo storage info = users[msg.sender];
-        info.email = newEmail;
-        info.addres = newAddres;
-    }
-}
+land.location = _location;
+    land.area = _area;
+  }
 
-
-
-contract Company {
-    struct CompanyInfo {
-        string name;
-        string registrationNumber;
-        string contactPerson;
-    }
-    
-    mapping(address => CompanyInfo) public companies;
-    mapping(uint64 => string) public emergencyNotifications;
-
-    DataObjectStore _store;
-    Lands _landsContract;
-    address public companyAddress;
-
-    constructor(DataObjectStore store, Lands landsContract) {
-        _store = store;
-        _landsContract = landsContract;
-        companyAddress = address(this);
-    }
-
-    function registerCompany(string memory name, string memory registrationNumber, string memory contactPerson) public {
-        companies[msg.sender] = CompanyInfo({
-            name: name,
-            registrationNumber: registrationNumber,
-            contactPerson: contactPerson
-        });
-    }
-
-    function getCompanyInfo() public view returns (string memory, string memory, string memory) {
-        CompanyInfo storage info = companies[msg.sender];
-        return (info.name, info.registrationNumber, info.contactPerson);
-    }
-
-    function updateCompanyInfo(string memory name, string memory registrationNumber, string memory contactPerson) public {
-        CompanyInfo storage info = companies[msg.sender];
-        info.name = name;
-        info.registrationNumber = registrationNumber;
-        info.contactPerson = contactPerson;
-    }
-
-    function createLand(string memory province, string memory town, string memory street, uint64 latitude, uint64 longitude) public {
-    _landsContract.registerLand(province, town, street, latitude, longitude);
-    }
-
-    function getLandInfo(uint64 blockId) public view returns (uint64, string memory, string memory, string memory, uint64, uint64) {
-        return _landsContract.getLandInfo(blockId);
-    }
-
-    function updateLandInfo(string memory province, string memory town, string memory street, uint64 latitude, uint64 longitude) public {
-    _landsContract.registerLand(province, town, street, latitude, longitude);
-    }
-
-    function getEmergency(address userAddress) public view returns (string memory) {
-        // Get user's emergency information
-        return _landsContract.getEmergency(userAddress);
-    }
-
-    function reportEmergency(address[] memory users, string memory emergencyMessage) public {
-        for (uint256 i = 0; i < users.length; i++) {
-            // Send emergency alert to users
-            _landsContract.reportEmergency(users[i], emergencyMessage);
-        }
-    }
-}
-
-
-contract Lands {
-
-    //Tokenization
-    struct LandInfo {
-        uint64 blockId;
-        uint64 areaId;
-        string province;
-        string town;
-        string street;
-        uint64 latitude;
-        uint64 longitude;
-    }
-    address public _companyContractAddress;
-    mapping(uint64 => LandInfo) public lands;
-    mapping(address => string) public emergencyNotifications;
-    uint64 public latestLandId = 0;
-    uint64 public latestBlockId = 0;
-
-    function registerLand(string memory province, string memory town, string memory street, uint64 latitude, uint64 longitude) public {
-        latestLandId++;
-        latestBlockId++;
-        lands[latestLandId] = LandInfo({
-            blockId: latestBlockId,
-            areaId: latestLandId,
-            province: province,
-            town: town,
-            street: street,
-            latitude: latitude,
-            longitude: longitude
-        });
-    }
-
-    function getLandInfo(uint64 landId) public view returns (uint64, string memory, string memory, string memory, uint64, uint64) {
-        LandInfo storage info = lands[landId];
-        return (info.areaId, info.province, info.town, info.street, info.latitude, info.longitude);
-    }
-    function getEmergency(address userAddress) public view returns (string memory) {
-    // Get emergency message from user
-    return emergencyNotifications[userAddress];
-    }
-    function reportEmergency(address user, string memory emergencyMessage) public {
-        emergencyNotifications[user] = emergencyMessage;
-    }
-
+// Function to query token status
+  function tokenStatus(uint256 _landId) public view returns (bool) {
+    Token storage token = tokens[_landId];
+    return token.active;
+  }
 }
