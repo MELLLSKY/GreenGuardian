@@ -1,44 +1,74 @@
 const { expect } = require("chai");
-const { ethers } = require("hardhat"); 
+const { ethers } = require("hardhat");
 
-describe("Contracts Integration Test", function () {
-    let DataObjectStore;
-    let User;
-    let Company;
-    let Lands;
+describe("LandToken", function () {
+  let landToken;
+  let institutionAddress;
 
-    let dataObjectStore;
-    let user;
-    let company;
-    let lands;
+  beforeEach(async function () {
+    [landToken, institutionAddress] = await ethers.getSigners();
+  });
 
-    beforeEach(async function () {
-        // Deploy DataObjectStore contract
-        DataObjectStore = await ethers.getContractFactory("DataObjectStore");
-        dataObjectStore = await DataObjectStore.deploy();
-        await dataObjectStore.deployed();
+});
+it("should add land successfully", async function () {
+  const landId = 1;
+  const location = "New York";
+  const area = 1000;
 
-        // Deploy User, Company, and Lands contracts with DataObjectStore address
-        User = await ethers.getContractFactory("User", { libraries: { DataObjectStore: dataObjectStore.address } });
-        user = await User.deploy(dataObjectStore.address);
-        await user.deployed();
+  await expect(
+    landToken.addLand(landId, location, area)
+  ).to.emit(landToken, "LandAdded");
 
-        Company = await ethers.getContractFactory("Company", { libraries: { DataObjectStore: dataObjectStore.address } });
-        company = await Company.deploy(dataObjectStore.address);
-        await company.deployed();
+  const land = await landToken.lands(landId);
+  expect(land.institution).to.equal(institutionAddress);
+  expect(land.location).to.equal(location);
+  expect(land.area).to.equal(area);
+  expect(land.active).to.equal(true);
+});
 
-        Lands = await ethers.getContractFactory("Lands", { libraries: { DataObjectStore: dataObjectStore.address } });
-        lands = await Lands.deploy(dataObjectStore.address);
-        await lands.deployed();
-    });
+it("should prevent adding land twice", async function () {
+  const landId = 1;
+  const location = "New York";
+  const area = 1000;
 
-    it("Should register a user, update user info, register a company, update company info, and create land", async function () {
+  await landToken.addLand(landId, location, area);
 
-        //example
-        await user.registerCustomer("Melise", "Kaya", 1, 30, "mell@example.com", "123 St");
-        const userInfo = await user.getCustomerInfo();
-        expect(userInfo[0]).to.equal("Melise");
-        expect(userInfo[1]).to.equal(30);
-        expect(userInfo[2]).to.equal("123 St");
-    });
+  await expect(
+    landToken.addLand(landId, location, area)
+  ).to.be.revertedWith("Land already added.");
+});
+it("should update land information successfully", async function () {
+  const landId = 1;
+  const newLocation = "London";
+  const newArea = 2000;
+
+  await landToken.addLand(landId, "New York", 1000);
+
+  await landToken.updateLand(landId, newLocation, newArea);
+
+  const land = await landToken.lands(landId);
+  expect(land.location).to.equal(newLocation);
+  expect(land.area).to.equal(newArea);
+});
+
+it("should prevent unauthorized updates", async function () {
+  // Deploy a second instance of the contract as a different institution
+  const otherInstitution = await ethers.getSigners();
+  const otherLandToken = await otherInstitution[0].deploy(LandToken);
+
+  await landToken.addLand(1, "New York", 1000);
+
+  await expect(
+    otherLandToken.connect(otherInstitution[0]).updateLand(1, "London", 2000)
+  ).to.be.revertedWith("You do not have permission to update this land.");
+});
+
+it("should return the token status correctly", async function () {
+  const landId = 1;
+  const expectedStatus = true;
+
+  await landToken.addLand(landId, "New York", 1000);
+
+  const status = await landToken.tokenStatus(landId);
+  expect(status).to.equal(expectedStatus);
 });
