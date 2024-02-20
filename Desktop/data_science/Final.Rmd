@@ -1,0 +1,691 @@
+---
+title: "Final"
+author: "Melise Kaya"
+date: "2024-01-15"
+output: html_document
+---
+
+## Libraries
+```{r}
+library(corrplot)
+library(ClusterR)
+library(cluster)
+library(ROSE)
+library(imbalance)
+library(tidyverse)
+library(ggplot2)
+library(caret)
+library(fable)
+library(car)
+library(skimr)
+library(caret)
+library(RANN)
+library(dplyr)
+library(caTools)
+library(ROCR)
+library(ISLR)
+library(randomForest)
+library(klaR)
+
+```
+## 1) Please find your original dataset or datasets; and describe your data in the first step.
+The dataset is about laptops configuration with prices containing 1302 laptops data with 12 columns Company name,type namee, laptop size in (inches), Screen resolution, CPU, RAM, Memory, GP, Operating system, Price in INR.
+https://github.com/LuluW8071/Laptop-Price-Prediction/tree/main/model
+
+```{r}
+laptop_data <- read.csv("C:/Users/monster/Desktop/laptop_data.csv")
+```
+
+## 2) Exploratory Data Analysis (EDA):
+```{r}
+# View the structure of the data frame
+str(laptop_data)
+
+# Get summary statistics for each numerical variable
+summary(laptop_data)
+```
+
+```{r}
+# To make Ram and Weight columns numeric
+laptop_data$Ram <- gsub("GB", "", laptop_data$Ram)
+laptop_data$Weight <- gsub("kg", "", laptop_data$Weight)
+```
+```{r}
+# To be able to use numerical data in the Memory column
+laptop_data$Memory_GB <- as.numeric(gsub("\\D", "", laptop_data$Memory))
+laptop_data$Memory_Type <- gsub("\\d+GB\\s*", "", laptop_data$Memory)
+laptop_data <- laptop_data[, !(names(laptop_data) %in% c("Memory"))]
+```
+```{r}
+# To be able to use numerical data in the Cpu column
+laptop_data$Cpu_Type <- gsub("\\s*\\d+\\.\\d+GHz", "", laptop_data$Cpu)
+laptop_data$Cpu_GHz <- as.numeric(gsub(".*?(\\d+\\.?\\d*)GHz.*", "\\1", laptop_data$Cpu))
+laptop_data <- laptop_data[, !(names(laptop_data) %in% c("Cpu"))]
+```
+```{r}
+# Remove X column
+laptop_data <- laptop_data[, !(names(laptop_data) %in% c("X"))]
+```
+```{r}
+# To be able to use numerical data in the ScreenResolution column
+laptop_data$ScreenR_Type <- gsub("\\s*\\d+x\\d+", "", laptop_data$ScreenResolution)
+laptop_data$ScreenR_X <- as.numeric(gsub(".*?(\\d+)x\\d+", "\\1", laptop_data$ScreenResolution))
+laptop_data$ScreenR_Y <- as.numeric(gsub(".*?x(\\d+)", "\\1", laptop_data$ScreenResolution))
+```
+```{r}
+#First two words to reduce the number of classes
+laptop_data$GpuInfo <- sapply(strsplit(as.character(laptop_data$Gpu), " "), function(x) paste(x[1], collapse = " "))
+```
+```{r}
+#First three words to reduce the number of classes
+laptop_data$CpuInfo <- sapply(strsplit(as.character(laptop_data$Cpu_Type), " "), function(x) paste(x[1], collapse = " "))
+```
+
+```{r}
+laptop_data$Company <- as.factor(laptop_data$Company)
+laptop_data$TypeName <- as.factor(laptop_data$TypeName)
+laptop_data$OpSys <- as.factor(laptop_data$OpSys)
+laptop_data$Memory_Type <- as.factor(laptop_data$Memory_Type)
+laptop_data$ScreenR_Type <- as.factor(laptop_data$ScreenR_Type)
+laptop_data$GpuInfo <- as.factor(laptop_data$GpuInfo)
+laptop_data$CpuInfo <- as.factor(laptop_data$CpuInfo)
+laptop_data$Ram <- as.numeric(laptop_data$Ram)
+laptop_data$Weight <- as.numeric(laptop_data$Weight)
+```
+
+```{r}
+head(laptop_data)
+```
+
+```{r}
+# View the structure of the data frame
+str(laptop_data)
+```
+
+```{r}
+# Get summary statistics for each numerical variable
+summary(laptop_data)
+```
+
+```{r}
+# Check for missing values
+sum(is.na(laptop_data))
+```
+
+### Correlation Analysis
+```{r}
+# Correlation matrix (excluding non-numeric columns)
+cor(laptop_data[, c("Inches", "Ram", "Memory_GB", "Weight", "Price", "ScreenR_X", "ScreenR_Y", "Cpu_GHz")])
+```
+The correlation analysis reveals that larger screen sizes (Inches) are strongly positively correlated with increased laptop weight, while higher RAM capacity correlates positively with elevated laptop prices; however, there is only a weak correlation between storage capacity (Memory_GB) and price.
+
+### Scatter Plots
+```{r}
+pairs(laptop_data[, c("Ram","Price")])
+```
+This chart shows the strong positive relationship between RAM and price.
+
+
+
+## 3) Use some “visualization techniques” and talk about your data further.
+
+Histogram
+Histogram analysis is an important method that helps us understand the shape, center and spread of data.
+```{r}
+hist(laptop_data$Price)
+hist(laptop_data$Inches)
+hist(laptop_data$Ram)
+```
+
+```{r}
+ggplot(data=laptop_data, aes(x=Ram)) +
+  geom_histogram(fill="blue", color="black", binwidth = 5)
+```
+
+Boxplot
+```{r}
+boxplot(Price ~ Company, data = laptop_data)
+```
+Acer, Chuwi and Toshiba companies have the lowest average prices, while Google and LG companies have slightly higher average prices. The average price of MSI company is the highest.
+
+Bar charts
+```{r}
+barplot(table(laptop_data$Company))
+barplot(table(laptop_data$TypeName))
+```
+
+##Priciness column
+In order to make the data suitable for the classification problem, take the average of the price column and divide the laptops into two classes as 0 and 1.
+```{r}
+# Mean of Price column
+mean_price <- mean(laptop_data$Price)
+
+# Identify values that are higher or lower than average
+laptop_data$Priciness <- ifelse(laptop_data$Price < mean_price, "0", "1")
+```
+
+## 4) Check your data for multicollinearity, make your comments.
+```{r}
+# Convert the `Priciness` column to a numeric vector
+laptop_data$Priciness <- as.numeric(laptop_data$Priciness)
+# Create a new data frame with the numeric columns
+numerical_columns <- data.frame(laptop_data[,c(3, 5, 8, 9, 10, 13, 15, 16, 19)])
+# Plot the correlation matrix
+corrplot(cor(numerical_columns),method = 'number')
+head
+```
+According to this graph, it means that laptops with large screen size, light weight, fast processor, more RAM, more storage space, long battery life and good graphics card are more expensive.
+
+
+## Z) Balance the Data
+This code utilizes the "ovun" package to create a sampled dataset for addressing an imbalanced classification problem by reducing the under-represented class through under-sampling.
+```{r}
+# Create a new data frame with balanced data
+laptop_data_under <- ovun.sample(Priciness ~ ., data = laptop_data, method = "under", N = 1072, seed = 1)$data
+# Create bar chart
+ggplot(data = laptop_data_under, aes(x = Priciness)) + geom_bar()
+
+```
+
+## 5) Apply PCA
+a. Use appropriate functions and arguments
+```{r}
+# Perform PCA on the scaled and centered numerical columns
+pca_data <- prcomp(numerical_columns, scale. = T, center = T)
+# Print a summary of the PCA results
+summary(pca_data)
+# Perform PCA on the numerical columns excluding "Priciness"
+pca_df <- prcomp(numerical_columns[, -which(names(numerical_columns) %in% "Priciness")], scale = TRUE)
+```
+
+b. Use visualization techniques for PCA, describe the result!
+```{r}
+screeplot(pca_data, type = "l", npcs = 4, main = "Screeplot of the first 4 PCs")
+abline(h = 1, col="blue", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"), col=c("blue"), lty=5, cex=0.6)
+
+print(pca_data)
+```
+
+c. Make your final comments clearly!
+The first two principal components explain 83% of the variance of the data set. This shows that the first two principal components represent most of the data set. In short, the output shows two key components that represent performance and portability, which are important factors to consider when purchasing a laptop.
+
+## Split Data (Train and Test)
+```{r}
+#split imbalanced/missing dataset test/train
+set.seed(123)
+imbalanced_laptop_data <- data.frame(laptop_data[,c(1,2,3,5,7,8,10,13,15,16,17,18,19)])
+#imbalanced_laptop_data <- drop_na(imbalanced_laptop_data)
+sample_imbalanced <- sample(2,nrow(imbalanced_laptop_data),replace=T,prob = c(0.8,0.2))
+train_imbalance<-imbalanced_laptop_data[sample_imbalanced==1,]
+test_imbalance<-imbalanced_laptop_data[sample_imbalanced==2,]
+
+
+# split balanced dataset
+set.seed(123)
+balanced_laptop_data<- data.frame(laptop_data_under[,c(1,2,3,5,7,8,10,13,15,16,17,18,19)])
+#balanced_laptop_data <- drop_na(balanced_laptop_data)
+sample_balanced <- sample(2,nrow(balanced_laptop_data),replace=T,prob = c(0.8,0.2))
+train_balance<-balanced_laptop_data[sample_balanced==1,]
+#train_balance<-drop_na(train_balance)
+test_balance<-balanced_laptop_data[sample_balanced==2,]
+test_balance<-drop_na(test_balance)
+```
+
+## 6) Apply Logistic Regression. 
+a. Use appropriate functions and arguments, 
+```{r}
+imbalanced_model <- glm(Priciness ~ ., family= binomial(link='logit'), data= train_imbalance)
+summary(imbalanced_model)
+```
+```{r}
+# Display the distribution of the 'Priciness' in the train datasets before/after balancing.
+table(train_imbalance$Priciness)
+table(train_balance$Priciness)
+```
+```{r}
+unique_values <- unique(train_imbalance$GpuInfo)
+print(unique_values)
+
+unique_values <- unique(test_imbalance$Gpu_info)
+print(unique_values)
+```
+
+```{r}
+predict_imbalanced <- predict(imbalanced_model, test_imbalance, type='response')
+fitted <- ifelse(predict_imbalanced>0.5,1,0)
+#Find accuracy
+misClassErrorİm <- mean(fitted != test_imbalance$Priciness)
+print(1- misClassErrorİm)
+```
+```{r}
+#Confusion Matrix
+table(test_imbalance$Priciness,predict_imbalanced>0.5)
+```
+Accuracy: (137 + 76) / (137 + 19 + 21 + 76) = 0.834
+F1 Score - Class 1: 2 * (0.800 * 0.783) / (0.800 + 0.783) = 0.791
+F1 Score - Class 0: 2 * (0.867 * 0.878) / (0.867 + 0.878) = 0.872
+
+The model's performance, based on the confusion matrix, reveals an overall accuracy of 83.4%.
+
+b. Use visualization techniques for Regression, describe the result!
+```{r}
+library(ROCR)
+pr_im <- prediction(fitted, as.numeric(test_imbalance$Priciness))
+prf_im <- performance(pr_im, measure = "tpr", x.measure = "fpr")
+plot(prf_im)
+```
+According to this chart the curve is concave up, which means that the TPR increases more slowly as the FPR increases. This suggests that the model is not very good at discriminating between positive and negative examples.
+The curve reaches a maximum TPR of about 0.8, which means that the model can correctly classify about 80% of the positive examples at best.The area under the curve (AUC) is about 0.6, which is not very good. An AUC of 1 would represent a perfect classifier, while an AUC of 0.5 would represent a random classifier.
+
+c. Which performance scores you chose? What is the final result? Make your final  comments clearly!
+In this model, the AUC value is 0.6 and the accuracy value is 0.8. However, the low AUC value indicates that the model has a lot of misclassifications. Therefore, studies are needed to improve the performance of the model.
+
+
+## 7) Apply at least 2 Clustering Techniques
+A. Describe the reason you choose those 2 techniques.
+I choose K Means and K Modes Clustering techniques.K-Means is one of the most popular clustering techniques. K-Modes is a clustering technique used in categorical data sets. These techniques are powerful techniques widely used in data mining. It can help discover hidden patterns and identify unique groups in my dataset.
+
+7.1) K MEANS CLUSTERING
+Imbalance Data 
+a. Use appropriate functions and arguments,
+```{r}
+set.seed(1)
+# Perform k-means clustering on a subset of numerical features
+kmeans_imbalanced <- kmeans(numerical_columns[,1:8],2,nstart = 20)
+# Analyze cluster distribution
+# This table will show the distribution of "Priciness" levels within each cluster
+table(kmeans_imbalanced$cluster,numerical_columns$Priciness)
+```
+
+b. Use visualization techniques. Describe the result!
+```{r}
+## Visualizing clusters
+clusplot(numerical_columns,
+         kmeans_imbalanced$cluster,
+         lines = 0,
+         shade = TRUE,
+         color = TRUE,
+         labels = 0)
+```
+c. Make your final comments clearly
+In the imbalanced case, there are 767 samples in the 1st cluster and 353 samples in the 2nd cluster. This means that cluster 2 is approximately half the size of cluster 1. This may cause the samples of cluster 2 to be heterogeneous.
+
+Balance Data 
+a. Use appropriate functions and arguments,
+```{r}
+# Create an undersampled dataset with 1072 examples from the original dataset.
+numeric_data_under <- ovun.sample(Priciness ~ ., data = numerical_columns, method = "under", N = 1072, seed = 1)$data
+```
+
+```{r}
+set.seed(1)
+kmeans_balanced <- kmeans(numeric_data_under[,1:8],2,nstart = 20)
+table(kmeans_balanced$cluster,numeric_data_under$Priciness)
+```
+
+b. Use visualization techniques. Describe the result!
+```{r}
+## Visualizing clusters
+clusplot(numeric_data_under,
+         kmeans_balanced$cluster,
+         lines = 0,
+         shade = TRUE,
+         color = TRUE,
+         labels = 0)
+```
+c. Make your final comments clearly.
+In the balanced case, there are 536 samples in both clusters. This means that both clusters are the same size. This ensures that the kmeans algorithm works with a similar number of samples in both clusters.
+
+bb. Compare the results you have found in 7.1 and 7.2. Which performance scores you chose? What is your final decision? Make your comments!
+When the results obtained are compared, it is seen that the results obtained on balanced data are more successful. When using kmeans clustering technique on unbalanced data, it is important to balance the data and use an effective balancing technique such as SMOTE. These steps can help significantly improve the performance of clusters.
+
+
+
+7.2 KMODES ALGORİTHM
+Imbalanced Data
+a. Use appropriate functions and arguments,
+```{r}
+# Create a new data frame with the selected categorical columns
+categorical_columns <- data.frame(laptop_data[,c(1,2,7,11,17,18,19)])
+# Convert the "Priciness" column to a factor variable
+categorical_columns$Priciness <- as.factor(categorical_columns$Priciness)
+set.seed(1)
+# Perform K-Modes clustering with 2 clusters
+kmodes_imbalanced <- kmodes(categorical_columns[,1:6], 2, iter.max = 10, weighted = FALSE)
+# Create a cross-tabulation table of cluster vs. price category
+table(kmodes_imbalanced$cluster,categorical_columns$Priciness)
+```
+The first cluster is very large and most of the samples belonging to the minority group are concentrated in the second cluster. It is difficult to distinguish examples from minority groups.
+
+b. Use visualization techniques. Describe the result!
+```{r}
+## Visualizing clusters
+clusplot(categorical_columns,
+         kmodes_imbalanced$cluster,
+         lines = 0,
+         shade = TRUE,
+         color = TRUE,
+         labels = 0)
+```
+
+Balanced Data
+a. Use appropriate functions and arguments,
+```{r}
+categoric_data_under <- ovun.sample(Priciness ~ ., data = categorical_columns, method = "under", N = 1072, seed = 1)$data
+```
+```{r}
+set.seed(1)
+kmodes_balanced_c <- kmodes(categoric_data_under[,1:6], 2, iter.max = 10, weighted = FALSE)
+table(kmodes_balanced_c$cluster,categoric_data_under$Priciness)
+
+```
+Both clusters are approximately the same size. It has examples from both groups. It is easier to distinguish samples in groups. These differences indicate that balanced data are more suitable for the kmodes clustering technique.
+
+b. Use visualization techniques. Describe the result!
+```{r}
+## Visualizing clusters
+clusplot(categoric_data_under,
+         kmodes_balanced_c$cluster,
+         lines = 0,
+         shade = TRUE,
+         color = TRUE,
+         labels = 0)
+```
+
+B. Compare the results you have found in 7.1 and 7.2. Which performance scores you  chose? What is your final decision? Make your comments!
+
+The K-Modes algorithm performed better than the K-Means algorithm on imbalanced data. This is because the K-Modes algorithm gives equal weight to samples belonging to both groups. On balanced data, K-Means and K-Modes algorithms showed similar performance. As a result, the K-Modes algorithm can perform better than the K-Means algorithm on unbalanced data.
+
+
+## 8) Apply at least 2 Classification Techniques (other than logistic regresiion)
+A. Describe the reason you choose those 2 techniques.
+I will use random forest and naive bayes algorithms in the classification part. I chose these techniques because they are quick to learn, flexible, and usable for a variety of data types. At the same time, the random forest algorithm performs well even on noisy data.
+
+8.1 RANDOM FOREST Algorithm with Imbalanced Data
+a. Use appropriate functions and arguments, 
+```{r}
+# Convert the "Priciness" column to factors
+train_imbalance$Priciness <- as.factor(train_imbalance$Priciness)
+test_imbalance$Priciness <- as.factor(test_imbalance$Priciness)
+# Train the random forest model, also calculate proximity information (for visualization and analysis if needed).
+imbalanced_rf_model <- randomForest(Priciness~., data=train_imbalance, proximity=TRUE)
+imbalanced_rf_model
+```
+```{r}
+# Make predictions on the test set.
+predicted_rf <- predict(imbalanced_rf_model, test_imbalance)
+# Evaluate the accuracy and error rates of the predictions.
+confusionMatrix(predicted_rf, test_imbalance$Priciness)
+```
+b. Use visualization techniques. Describe the result!
+```{r}
+# Visualize the importance of the variables.
+varImpPlot(imbalanced_rf_model)
+```
+
+c. Make your final comments clearly.
+The prediction accuracy is 89.72%. This indicates that the model correctly classified 89.72% of the samples in the test dataset.
+
+8.1 RANDOM FOREST Algorithm with Balanced Data
+a. Use appropriate functions and arguments, 
+```{r}
+train_balance$Priciness <- as.factor(train_balance$Priciness)
+test_balance$Priciness <- as.factor(test_balance$Priciness)
+balanced_rf_model <- randomForest(Priciness~., data=train_balance, proximity=TRUE)
+balanced_rf_model
+```
+```{r}
+predicted_rf <- predict(balanced_rf_model, test_balance)
+confusionMatrix(predicted_rf, test_balance$Priciness)
+
+```
+b. Use visualization techniques. Describe the result!
+```{r}
+varImpPlot(balanced_rf_model)
+
+```
+
+c. Make your final comments clearly.
+Prediction accuracy is 94.22%. This indicates that the model correctly classified 94.22% of the samples in the test dataset.
+
+
+B. Compare the results you have found in balance and imbalanced Which performance scores you 
+chose? What is your final decision? Make your comments!
+The results I obtained on the unbalanced data set are lower than the results I obtained on the balanced data set. The prediction accuracy is 89.72% on the unbalanced data set, while it is 94.22% on the balanced data set. This shows that in the balanced data set, it is possible for the model to focus more on minority class samples and therefore make more accurate predictions.
+
+8.2 NAIVE BAYES
+```{r}
+library(naivebayes)
+# Train the Naive Bayes model using the "Priciness" column as the classification variable.
+# The "usekernel = T" and "laplace = 1" parameters enable the model to be created using a Gaussian distribution and Laplace correction.
+model <- naive_bayes(Priciness ~ ., data = train_imbalance, usekernel = T, laplace = 1) 
+
+predicted_values <- predict(model, newdata = test_imbalance)
+library(caret)
+confusionMatrix(predicted_values, test_imbalance$Priciness)
+```
+c. Make your final comments clearly.
+Accuracy: 0.8498, meaning 84.98% of model predictions are correct.
+This model performs the classification task with reasonable accuracy. It is especially good at identifying the positive class. Although the model is slightly less good at identifying the negative class, its overall performance is still satisfactory.
+
+BB. Compare the results you have found in 8.1 and 8.2. Which performance scores you 
+chose? What is your final decision? Make your comments!
+Random Forest outperforms Naive Bayes in terms of overall accuracy, kappa, and balanced accuracy. This means Random Forest is better at correctly identifying both classes.
+
+
+## Y) MISSING DATA
+```{r}
+laptop_data_NA <- laptop_data
+
+```
+```{r}
+
+# Specify observations to delete
+remove_rate <- round(nrow(laptop_data_NA) *0.10)
+remove_data <- sample(1:nrow(laptop_data_NA), remove_rate)
+
+# Replace specified observations with NA
+laptop_data_NA[remove_data, "Cpu_GHz"] <- NA
+laptop_data_NA[remove_data, "Ram"] <- NA
+
+```
+
+
+Imputed Data
+```{r}
+laptop_data_imputed <- laptop_data
+```
+```{r}
+
+# Specify observations to delete
+remove_rate <- round(nrow(laptop_data_imputed) *0.10)
+remove_data <- sample(1:nrow(laptop_data_imputed), remove_rate)
+
+# Replace specified observations with NA
+laptop_data_imputed[remove_data, "Cpu_GHz"] <- NA
+laptop_data_imputed[remove_data, "Ram"] <- NA
+```
+
+```{r}
+# Analyze missing values
+imputed <- skim(laptop_data_imputed)
+imputed[,1:19]
+```
+```{r}
+# Impute missing values
+missingdata_model <- preProcess(laptop_data_imputed, method='knnImpute')
+missingdata_model
+```
+
+```{r}
+laptop_data_imputed <- predict(missingdata_model, newdata = laptop_data_imputed)
+anyNA(laptop_data_imputed)
+```
+```{r}
+# Take average of categorical column
+missing_mean_price <- mean(laptop_data_imputed$Price)
+
+# Identify values that are higher or lower than average
+laptop_data_imputed$Priciness <- ifelse(laptop_data_imputed$Price < missing_mean_price, "0", "1")
+
+```
+
+Y.8.1 Random Forest Algorithm with NA Data
+```{r}
+# Set random seed for reproducibility
+set.seed(123)
+# Convert Priciness to factor
+laptop_data_NA$Priciness <- as.factor(laptop_data_NA$Priciness)
+# Create imbalanced stratified sample
+sample_NA <- sample(2,nrow(laptop_data_NA),replace=T,prob = c(0.8,0.2))
+# Split data into training and test sets
+train_NA<-laptop_data_NA[sample_NA==1,]
+test_NA<-laptop_data_NA[sample_NA==2,]
+```
+
+a. Use appropriate functions and arguments, 
+```{r}
+train_drop_NA <- drop_na(train_NA)
+# Build random forest model with proximity
+NA_rf_model <- randomForest(Priciness~., data=train_drop_NA, proximity=TRUE)
+NA_rf_model
+
+```
+```{r}
+test_drop_NA <- drop_na(test_NA)
+# Predict Priciness on test data
+predicted_rf <- predict(NA_rf_model, test_drop_NA)
+confusionMatrix(predicted_rf, test_drop_NA$Priciness)
+```
+b. Use visualization techniques. Describe the result!
+```{r}
+varImpPlot(NA_rf_model)
+```
+c. Make your final comments clearly.
+The codes I applied on data containing NA values gave an error. When I used the drop_na function, the accuracy value was 1.
+
+Y.8.1 Random Forest Algorithm with Imputed Data
+
+```{r}
+# Set random seed for reproducibility
+set.seed(123)
+# Convert Priciness to factor
+laptop_data_imputed$Priciness <- as.factor(laptop_data_imputed$Priciness)
+# Create imbalanced stratified sample
+sample_imputed <- sample(2,nrow(laptop_data_imputed),replace=T,prob = c(0.8,0.2))
+# Split data into training and test sets
+train_imputed<-laptop_data_imputed[sample_imputed==1,]
+test_imputed<-laptop_data_imputed[sample_imputed==2,]
+```
+
+a. Use appropriate functions and arguments, 
+```{r}
+# Build random forest model with proximity
+missing_rf_model <- randomForest(Priciness~., data=train_imputed, proximity=TRUE)
+missing_rf_model
+
+```
+```{r}
+# Predict Priciness on test data
+predicted_rf <- predict(missing_rf_model, test_imputed)
+confusionMatrix(predicted_rf, test_imputed$Priciness)
+```
+b. Use visualization techniques. Describe the result!
+```{r}
+varImpPlot(missing_rf_model)
+```
+c. Make your final comments clearly.
+The random forest model achieved 98.7% accuracy for class “1” and 84.6% accuracy for class “2”. This shows that the model performs well overall. However, the accuracy rate is lower for class "2". This means that class "1" is more common in the dataset and the model is better able to predict this class.
+
+Compare the “results with missing values” and “result with imputed values”. 
+(DON’T compare it with the original dataset!). Which performance scores you 
+chose? What is your final decision?
+If we compare the accuracy rates, results with missing values have a better accuracy rate. But I think result with imputed values was a more purposeful approach. Because the other one didn't work without filling in the gaps.
+
+
+
+## 9) Hyperparameter Tuning, with all your explanation and comments
+```{r}
+library(randomForest)
+# Define the target variable
+y <- train_imbalance$Priciness
+
+# Define the hyperparameter space
+hyper_parameters <- expand.grid(
+  n_estimators = c(100, 200),
+  max_depth = c(5, 10),
+  min_samples_split = c(5, 10),
+  min_samples_leaf = c(5, 10),
+  mtry = c(2, 3)
+)
+
+# Perform the grid search
+results <- list()
+predictions <- list()
+matricies <- list()
+for (i in 1:nrow(hyper_parameters)) {
+  model <- randomForest(y ~ ., data = train_imbalance, ntree = hyper_parameters$n_estimators[i], maxdepth = hyper_parameters$max_depth[i], min_samples_split = hyper_parameters$min_samples_split[i], min_samples_leaf = hyper_parameters$min_samples_leaf[i], mtry = hyper_parameters$mtry[i])
+  results[[i]] <- model
+  predictions[[i]] <-predict(model, test_imbalance)
+  predicted_rf <- predict(model, test_imbalance)
+  matricies[[i]] <- confusionMatrix(predicted_rf, test_imbalance$Priciness)
+}
+
+
+```
+
+```{r}
+print(matricies)
+```
+Seems to perform well on many models
+
+## 10) Cross- Validation, with all your explanation and comments
+Imbalance Data
+```{r}
+laptop_data_with_ıd <- read.csv("C:/Users/monster/Desktop/laptop_data.csv")
+head(laptop_data_with_ıd)
+numerical_columns$X <-laptop_data_with_ıd$X
+
+```
+
+```{r}
+
+#specify the cross-validation method
+ctrl <- trainControl(method = "cv", number = 5)
+
+#fit a regression model and use k-fold CV to evaluate performance
+model <- train(X~ ., data = numerical_columns, method = "lm", trControl = ctrl)
+print(model)
+```
+
+```{r}
+model$finalModel
+```
+```{r}
+#We can use the following code to view the model predictions made for each fold
+model$resample
+```
+Balance Data
+```{r}
+# Create a new data frame with balanced data
+balance_Id_numeric_under <- ovun.sample(Priciness ~ ., data = numerical_columns, method = "under", N = 1072, seed = 1)$data
+```
+
+```{r}
+#specify the cross-validation method
+ctrl2 <- trainControl(method = "cv", number = 5)
+
+#fit a regression model and use k-fold CV to evaluate performance
+model2 <- train(X ~ ., data = balance_Id_numeric_under, method = "lm", trControl = ctrl)
+print(model2)
+```
+```{r}
+model2$finalModel
+```
+```{r}
+#We can use the following code to view the model predictions made for each fold
+model2$resample
+```
+
+The RMSE value of the model trained on the unbalanced data set is 365.22, the R-squared value is 0.064, and the MAE value is 311.64, while the RMSE value of the model trained on the balanced data set is 356.45, the R-squared value is 0.071, and the MAE value is 301.41. As can be seen from these values, the error rate of the model trained on the balanced data set is lower and its ability to explain the variance in the target variable is higher.
